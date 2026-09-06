@@ -1,0 +1,226 @@
+# Environment / Secrets
+
+.env
+.env.local
+.env.*.local
+!.env.example
+!.env.local.example
+
+# Python / FastAPI
+
+**pycache**/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+
+venv/
+.venv/
+env/
+ENV/
+
+# Python tooling
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.pyre/
+
+# SQLite / Local Database
+
+
+*.db
+*.sqlite
+*.sqlite3
+
+# Node / Next.js
+
+
+node_modules/
+.next/
+out/
+dist/
+build/
+
+# Next.js cache
+
+.turbo/
+
+# npm
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# TypeScript
+
+*.tsbuildinfo
+
+# IDE / Editor
+
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+.idea/
+*.iml
+
+# OS files
+
+.DS_Store
+Thumbs.db
+
+# Logs
+
+*.log
+logs/
+
+
+# Testing / Coverage
+
+coverage/
+.pytest_cache/
+
+# Temporary files
+
+
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+# =========================
+
+# Environment / Secrets
+
+# =========================
+
+.env
+.env.local
+.env.*.local
+!.env.example
+!.env.local.example
+
+# =========================
+
+# Python / FastAPI
+
+# =========================
+
+**pycache**/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+
+venv/
+.venv/
+env/
+ENV/
+
+# Python tooling
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.pyre/
+
+# =========================
+
+# SQLite / Local Database
+
+# =========================
+
+*.db
+*.sqlite
+*.sqlite3
+
+# =========================
+
+# Node / Next.js
+
+# =========================
+
+node_modules/
+.next/
+out/
+dist/
+build/
+
+# Next.js cache
+
+.turbo/
+
+# npm
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# =========================
+
+# TypeScript
+
+# =========================
+
+*.tsbuildinfo
+
+# =========================
+
+# IDE / Editor
+
+# =========================
+
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+.idea/
+*.iml
+
+# =========================
+
+# OS files
+
+# =========================
+
+.DS_Store
+Thumbs.db
+
+# =========================
+
+# Logs
+
+# =========================
+
+*.log
+logs/
+
+# =========================
+
+# Testing / Coverage
+
+# =========================
+
+coverage/
+.pytest_cache/
+
+# =========================
+
+# Temporary files
+
+# =========================
+
+*.tmp
+*.temp
+*.swp
+*.swo
+*~

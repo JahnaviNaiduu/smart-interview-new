@@ -10,7 +10,6 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str
     RESEND_API_KEY: str
     RESEND_FROM_EMAIL: str = "noreply@yourdomain.com"
-    RESEND_TEST_TO_EMAIL: Optional[str] = None
     SECRET_KEY: str
     ENCRYPTION_KEY: Optional[str] = None
     FRONTEND_URL: str = "http://localhost:3000"

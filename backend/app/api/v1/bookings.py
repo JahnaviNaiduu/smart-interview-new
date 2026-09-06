@@ -10,6 +10,7 @@ from app.models.panelist import Panelist
 from app.schemas.booking import BookingCreate, BookingOut, BookingDetailOut
 from app.services.calendar_service import create_calendar_event, delete_calendar_event
 from app.services.notification_service import send_booking_confirmation, send_cancellation
+from app.services.booking_service import book_slot_atomic, SlotConflictError
 
 router = APIRouter(prefix="/bookings", tags=["bookings"])
 
@@ -84,23 +85,11 @@ def create_booking(payload: BookingCreate, background_tasks: BackgroundTasks, db
     if not slot:
         raise HTTPException(status_code=404, detail="Slot not found or does not belong to this interview")
 
-    existing = db.query(Booking).filter(
-        Booking.interview_request_id == payload.interview_request_id,
-        Booking.status == "confirmed",
-    ).first()
-    if existing:
-        raise HTTPException(status_code=409, detail="A booking already exists for this interview")
-
-    booking = Booking(
-        interview_request_id=interview.id,
-        slot_id=slot.id,
-        status="confirmed",
-    )
-    db.add(booking)
-    slot.is_selected = True
-    interview.status = "booked"
-    db.commit()
-    db.refresh(booking)
+    # Atomic reservation with panelist conflict prevention (see booking_service).
+    try:
+        booking = book_slot_atomic(db, interview, slot)
+    except SlotConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
     background_tasks.add_task(_do_confirm_booking, interview.id, slot.id, booking.id)
     return booking

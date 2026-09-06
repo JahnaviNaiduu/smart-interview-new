@@ -1,5 +1,7 @@
 from typing import Optional, List
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
+from pydantic import BaseModel, model_validator
 from sqlalchemy.orm import Session, joinedload
 from app.core.database import get_db
 from app.core.config import settings
@@ -7,6 +9,7 @@ from app.core.auth import require_staff, get_current_user
 from app.models.user import User
 from app.models.interview import InterviewRequest
 from app.models.candidate import Candidate
+from app.models.panelist import Panelist
 from app.models.availability_slot import AvailabilitySlot
 from app.schemas.interview import InterviewRequestCreate, InterviewRequestUpdate, InterviewRequestOut
 from app.services.token_service import generate_candidate_token
@@ -25,11 +28,27 @@ def _upsert_candidate(db: Session, candidate_data) -> Candidate:
         existing.timezone = candidate_data.timezone
         if candidate_data.phone:
             existing.phone = candidate_data.phone
+        # Preserve/refresh candidate skills (source of truth for matching).
+        if candidate_data.skills:
+            existing.skills = candidate_data.skills
         return existing
     candidate = Candidate(**candidate_data.model_dump())
     db.add(candidate)
     db.flush()
     return candidate
+
+
+def _validate_panelists(db: Session, panelist_ids: list) -> list:
+    """Backend-authoritative check: every requested panelist must exist and be active.
+    Never trust arbitrary panelist IDs from the frontend."""
+    panelists = db.query(Panelist).filter(
+        Panelist.id.in_(panelist_ids), Panelist.is_active == True  # noqa: E712
+    ).all()
+    found = {p.id for p in panelists}
+    missing = [pid for pid in panelist_ids if pid not in found]
+    if missing:
+        raise HTTPException(status_code=400, detail="One or more selected panelists are invalid or inactive")
+    return panelists
 
 
 @router.get("", response_model=List[InterviewRequestOut])
@@ -52,6 +71,9 @@ def create_interview(
 ):
     candidate = _upsert_candidate(db, payload.candidate)
     token, expires_at = generate_candidate_token()
+
+    # Backend-authoritative: reject invalid/inactive panelist IDs from the client.
+    _validate_panelists(db, payload.required_panelist_ids)
 
     # The requesting recruiter is the authenticated user, not a client-supplied field.
     recruiter_email = current_user.email
@@ -198,3 +220,93 @@ def resend_invite(interview_id: str, background_tasks: BackgroundTasks, db: Sess
         recruiter_email=interview.recruiter_email,
     )
     return {"message": "Invite resent"}
+
+
+class ProposeSlotsRequest(BaseModel):
+    window_start: Optional[datetime] = None
+    window_end: Optional[datetime] = None
+    required_panelist_ids: Optional[List[str]] = None
+
+    @model_validator(mode="after")
+    def validate_window(self):
+        if self.window_start and self.window_end and self.window_end <= self.window_start:
+            raise ValueError("window_end must be after window_start")
+        return self
+
+
+@router.post("/{interview_id}/propose-slots", response_model=InterviewRequestOut)
+def propose_new_slots(
+    interview_id: str,
+    payload: ProposeSlotsRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Recruiter proposes a fresh set of slots (e.g. after a candidate reschedule
+    request). Candidate skills, round type and interview identity are preserved."""
+    interview = db.query(InterviewRequest).options(
+        joinedload(InterviewRequest.candidate),
+        joinedload(InterviewRequest.slots),
+    ).filter(InterviewRequest.id == interview_id).first()
+    if not interview:
+        raise HTTPException(status_code=404, detail="Interview request not found")
+
+    if payload.required_panelist_ids:
+        _validate_panelists(db, payload.required_panelist_ids)
+        interview.required_panelist_ids = payload.required_panelist_ids
+    if payload.window_start:
+        interview.window_start = payload.window_start
+    if payload.window_end:
+        interview.window_end = payload.window_end
+
+    # Recompute slots against current calendars; replace the old proposal.
+    raw_slots = find_available_slots(
+        db=db,
+        panelist_ids=interview.required_panelist_ids,
+        window_start=interview.window_start,
+        window_end=interview.window_end,
+        duration_minutes=interview.duration_minutes,
+        buffer_minutes=interview.buffer_minutes,
+        preferred_timezone=interview.preferred_timezone,
+    )
+    ranked_slots = rank_slots(raw_slots, interview.candidate.timezone, {})
+
+    for old in list(interview.slots):
+        db.delete(old)
+    db.flush()
+
+    for slot_data in ranked_slots[:10]:
+        db.add(AvailabilitySlot(
+            interview_request_id=interview.id,
+            start_time=slot_data["start"],
+            end_time=slot_data["end"],
+            ai_rank=slot_data.get("ai_rank"),
+            ai_score=slot_data.get("ai_score"),
+            ai_reasoning=slot_data.get("ai_reasoning"),
+        ))
+
+    # Refresh the candidate link expiry and re-notify.
+    token, expires_at = generate_candidate_token()
+    interview.candidate_link_token = token
+    interview.token_expires_at = expires_at
+    interview.reschedule_reason = None
+    interview.status = "slots_found" if ranked_slots else "pending"
+    db.commit()
+    db.refresh(interview)
+
+    if ranked_slots:
+        background_tasks.add_task(
+            _send_invite_email,
+            interview_id=interview.id,
+            candidate_email=interview.candidate.email,
+            candidate_name=interview.candidate.name,
+            job_title=interview.job_title,
+            round_type=interview.round_type,
+            token=token,
+            expires_at=expires_at,
+            recruiter_email=interview.recruiter_email,
+        )
+
+    return db.query(InterviewRequest).options(
+        joinedload(InterviewRequest.candidate),
+        joinedload(InterviewRequest.slots),
+    ).filter(InterviewRequest.id == interview.id).first()

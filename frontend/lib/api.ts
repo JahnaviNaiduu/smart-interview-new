@@ -50,6 +50,19 @@ export const getInterview = (id: string) => api.get(`/interviews/${id}`).then((r
 export const updateInterview = (id: string, data: any) => api.patch(`/interviews/${id}`, data).then((r) => r.data);
 export const cancelInterview = (id: string) => api.delete(`/interviews/${id}`);
 export const resendInvite = (id: string) => api.post(`/interviews/${id}/resend-invite`).then((r) => r.data);
+export const proposeNewSlots = (id: string, data: any = {}) =>
+  api.post(`/interviews/${id}/propose-slots`, data).then((r) => r.data);
+
+// --- Intelligent interviewer recommendation ---
+export const recommendPanelists = (data: {
+  candidate_skills: string[];
+  round_type: string;
+  window_start: string;
+  window_end: string;
+  duration_minutes?: number;
+  buffer_minutes?: number;
+  preferred_timezone?: string;
+}) => api.post("/panelists/recommend", data).then((r) => r.data);
 
 // --- Availability ---
 export const getCandidateLinkData = (token: string) =>
@@ -59,6 +72,8 @@ export const submitCandidateAvailability = (data: {
   selected_slot_ids: string[];
   candidate_timezone: string;
 }) => api.post("/availability/candidate/submit", data).then((r) => r.data);
+export const requestCandidateReschedule = (data: { token: string; reason?: string }) =>
+  api.post("/availability/candidate/reschedule", data).then((r) => r.data);
 
 // --- Bookings ---
 export const createBooking = (data: { interview_request_id: string; slot_id: string }) =>

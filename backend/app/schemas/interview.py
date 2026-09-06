@@ -89,6 +89,7 @@ class InterviewRequestOut(BaseModel):
     candidate_link_token: Optional[str]
     token_expires_at: Optional[datetime]
     notes: Optional[str]
+    reschedule_reason: Optional[str] = None
     slots: List[SlotOut] = []
     created_at: datetime
     updated_at: datetime

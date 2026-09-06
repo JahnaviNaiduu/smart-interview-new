@@ -1,15 +1,28 @@
 from typing import Optional, List
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.auth import require_staff, require_admin
 from app.models.panelist import Panelist
 from app.schemas.panelist import PanelistCreate, PanelistUpdate, PanelistOut
 from app.services.calendar_service import get_oauth_url, exchange_code_for_tokens
+from app.services.matching_service import recommend_panelists
 from app.core.config import settings
 
 router = APIRouter(prefix="/panelists", tags=["panelists"])
+
+
+class RecommendRequest(BaseModel):
+    candidate_skills: List[str] = []
+    round_type: str
+    window_start: datetime
+    window_end: datetime
+    duration_minutes: int = 60
+    buffer_minutes: int = 15
+    preferred_timezone: str = "UTC"
 
 
 @router.get("", response_model=List[PanelistOut])
@@ -39,6 +52,24 @@ def create_panelist(payload: PanelistCreate, db: Session = Depends(get_db), _=De
     db.commit()
     db.refresh(panelist)
     return PanelistOut.from_orm_with_calendar(panelist)
+
+
+@router.post("/recommend")
+def recommend(payload: RecommendRequest, db: Session = Depends(get_db), _=Depends(require_staff)):
+    """Rank eligible, available panelists by candidate-skill match for this round.
+    Deterministic and explainable; availability overrides skill ranking."""
+    if payload.window_end <= payload.window_start:
+        raise HTTPException(status_code=422, detail="window_end must be after window_start")
+    return recommend_panelists(
+        db=db,
+        candidate_skills=payload.candidate_skills,
+        round_type=payload.round_type,
+        window_start=payload.window_start,
+        window_end=payload.window_end,
+        duration_minutes=payload.duration_minutes,
+        buffer_minutes=payload.buffer_minutes,
+        preferred_timezone=payload.preferred_timezone,
+    )
 
 
 # IMPORTANT: /calendar-callback must be declared BEFORE /{panelist_id}

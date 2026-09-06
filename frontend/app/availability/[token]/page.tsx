@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import GlassCard from "@/components/ui/GlassCard";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
-import { getCandidateLinkData, submitCandidateAvailability, createBooking } from "@/lib/api";
+import { getCandidateLinkData, submitCandidateAvailability, requestCandidateReschedule } from "@/lib/api";
 import { formatDateShort, scoreBar, TIMEZONES } from "@/lib/utils";
 import toast from "react-hot-toast";
 import clsx from "clsx";
@@ -16,6 +16,9 @@ export default function CandidateAvailabilityPage() {
   const [tz, setTz] = useState("UTC");
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
+  const [rescheduleOpen, setRescheduleOpen] = useState(false);
+  const [rescheduleReason, setRescheduleReason] = useState("");
+  const [rescheduled, setRescheduled] = useState(false);
 
   useEffect(() => {
     getCandidateLinkData(token)
@@ -60,12 +63,24 @@ export default function CandidateAvailabilityPage() {
     if (selected.length === 0) { toast.error("Please select at least one slot"); return; }
     setSubmitting(true);
     try {
-      const result = await submitCandidateAvailability({ token, selected_slot_ids: selected, candidate_timezone: tz });
-      // Auto-book the best slot
-      await createBooking({ interview_request_id: result.interview_id, slot_id: result.best_slot_id });
+      // The submit endpoint now performs the atomic, conflict-checked booking.
+      await submitCandidateAvailability({ token, selected_slot_ids: selected, candidate_timezone: tz });
       setDone(true);
     } catch (err: any) {
+      // 409 → the slot was taken by another candidate in the meantime.
       toast.error(err.message || "Submission failed");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleReschedule = async () => {
+    setSubmitting(true);
+    try {
+      await requestCandidateReschedule({ token, reason: rescheduleReason.trim() });
+      setRescheduled(true);
+    } catch (err: any) {
+      toast.error(err.message || "Could not request reschedule");
     } finally {
       setSubmitting(false);
     }
@@ -83,6 +98,16 @@ export default function CandidateAvailabilityPage() {
         <div className="text-5xl text-white/80 font-light">✓</div>
         <h1 className="text-white text-xl font-light">You're confirmed!</h1>
         <p className="text-white/50 text-sm">Your interview has been booked. Check your email for the calendar invite and Google Meet link.</p>
+      </GlassCard>
+    </div>
+  );
+
+  if (rescheduled) return (
+    <div className="min-h-screen bg-glow flex items-center justify-center p-4">
+      <GlassCard className="max-w-md w-full text-center space-y-4 animate-fade-in">
+        <div className="text-5xl text-white/80 font-light">⟳</div>
+        <h1 className="text-white text-xl font-light">Reschedule requested</h1>
+        <p className="text-white/50 text-sm">We've let the recruiter know none of these times worked. They'll send you a new set of slots shortly.</p>
       </GlassCard>
     </div>
   );
@@ -199,6 +224,35 @@ export default function CandidateAvailabilityPage() {
         >
           {submitting ? <LoadingSpinner size="sm" /> : `Confirm ${selected.length} slot${selected.length !== 1 ? "s" : ""}`}
         </button>
+
+        {/* Reject all / request reschedule */}
+        {!rescheduleOpen ? (
+          <button
+            className="btn-ghost w-full justify-center text-sm"
+            onClick={() => setRescheduleOpen(true)}
+            disabled={submitting}
+          >
+            None of these work — request a reschedule
+          </button>
+        ) : (
+          <GlassCard className="!p-5 space-y-3">
+            <p className="text-white/60 text-sm">Let the recruiter know why (optional) and we'll ask them to propose new times.</p>
+            <textarea
+              className="glass-input min-h-[70px] resize-none"
+              placeholder="e.g. I'm travelling that week"
+              value={rescheduleReason}
+              onChange={(e) => setRescheduleReason(e.target.value)}
+            />
+            <div className="flex gap-2">
+              <button className="btn-ghost flex-1 justify-center" onClick={() => setRescheduleOpen(false)} disabled={submitting}>
+                Cancel
+              </button>
+              <button className="btn-primary flex-1 justify-center" onClick={handleReschedule} disabled={submitting}>
+                {submitting ? <LoadingSpinner size="sm" /> : "Request reschedule"}
+              </button>
+            </div>
+          </GlassCard>
+        )}
       </div>
     </div>
   );

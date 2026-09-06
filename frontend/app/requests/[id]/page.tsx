@@ -5,7 +5,7 @@ import Sidebar from "@/components/layout/Sidebar";
 import TopBar from "@/components/layout/TopBar";
 import GlassCard from "@/components/ui/GlassCard";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
-import { getInterview, cancelInterview, resendInvite, createBooking } from "@/lib/api";
+import { getInterview, cancelInterview, resendInvite, createBooking, proposeNewSlots } from "@/lib/api";
 import { statusClass, statusLabel, formatDateTime, roundLabel, scoreBar } from "@/lib/utils";
 import toast from "react-hot-toast";
 import clsx from "clsx";
@@ -30,6 +30,7 @@ export default function RequestDetailPage() {
   const [loading, setLoading] = useState(true);
   const [cancelling, setCancelling] = useState(false);
   const [resending, setResending] = useState(false);
+  const [proposing, setProposing] = useState(false);
 
   const load = () => {
     getInterview(id)
@@ -66,6 +67,19 @@ export default function RequestDetailPage() {
     }
   };
 
+  const handlePropose = async () => {
+    setProposing(true);
+    try {
+      await proposeNewSlots(id);
+      toast.success("New slots proposed and sent to the candidate");
+      load();
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setProposing(false);
+    }
+  };
+
   if (loading) return (
     <div className="flex min-h-screen bg-glow">
       <Sidebar />
@@ -95,8 +109,16 @@ export default function RequestDetailPage() {
                 <span className={statusClass(interview.status)}>{statusLabel(interview.status)}</span>
               </div>
               <p className="text-white/40 text-sm">{roundLabel(interview.round_type)} Interview · {interview.duration_minutes} min</p>
+              {interview.status === "rescheduling" && interview.reschedule_reason && (
+                <p className="text-white/50 text-xs mt-1">Reschedule reason: “{interview.reschedule_reason}”</p>
+              )}
             </div>
             <div className="flex gap-2">
+              {interview.status === "rescheduling" && (
+                <button className="btn-primary text-xs" onClick={handlePropose} disabled={proposing}>
+                  {proposing ? <LoadingSpinner size="sm" /> : "Propose New Slots"}
+                </button>
+              )}
               {interview.status !== "cancelled" && interview.status !== "booked" && (
                 <>
                   <button className="btn-ghost text-xs" onClick={handleResend} disabled={resending}>

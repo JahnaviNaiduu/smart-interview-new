@@ -5,7 +5,7 @@ import Sidebar from "@/components/layout/Sidebar";
 import TopBar from "@/components/layout/TopBar";
 import GlassCard from "@/components/ui/GlassCard";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
-import { getPanelists, createInterview } from "@/lib/api";
+import { getPanelists, createInterview, recommendPanelists } from "@/lib/api";
 import { TIMEZONES, ROUND_TYPES, DURATIONS } from "@/lib/utils";
 import toast from "react-hot-toast";
 import clsx from "clsx";
@@ -17,9 +17,11 @@ export default function NewRequestPage() {
   const [step, setStep] = useState(0);
   const [panelists, setPanelists] = useState<any[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [recommending, setRecommending] = useState(false);
+  const [recs, setRecs] = useState<Record<string, any>>({});
 
   const [form, setForm] = useState({
-    candidate: { name: "", email: "", phone: "", timezone: "Asia/Kolkata" },
+    candidate: { name: "", email: "", phone: "", timezone: "Asia/Kolkata", skills: [] as string[] },
     job_title: "",
     round_type: "technical",
     duration_minutes: 60,
@@ -49,6 +51,38 @@ export default function NewRequestPage() {
         ? prev.required_panelist_ids.filter((p) => p !== id)
         : [...prev.required_panelist_ids, id],
     }));
+  };
+
+  const runRecommend = async () => {
+    if (!form.window_start || !form.window_end) {
+      toast.error("Set the interview window first (step 2)");
+      return;
+    }
+    setRecommending(true);
+    try {
+      const results = await recommendPanelists({
+        candidate_skills: form.candidate.skills,
+        round_type: form.round_type,
+        window_start: new Date(form.window_start).toISOString(),
+        window_end: new Date(form.window_end).toISOString(),
+        duration_minutes: form.duration_minutes,
+        buffer_minutes: form.buffer_minutes,
+        preferred_timezone: form.candidate.timezone,
+      });
+      const map: Record<string, any> = {};
+      results.forEach((r: any) => { map[r.panelist_id] = r; });
+      setRecs(map);
+      // Auto-select the top available recommendation for convenience.
+      const topAvailable = results.find((r: any) => r.available);
+      if (topAvailable && !form.required_panelist_ids.includes(topAvailable.panelist_id)) {
+        togglePanelist(topAvailable.panelist_id);
+      }
+      toast.success("Ranked panelists by skill match & availability");
+    } catch (err: any) {
+      toast.error(err.message || "Could not recommend panelists");
+    } finally {
+      setRecommending(false);
+    }
   };
 
   const validateStep = () => {
@@ -133,6 +167,16 @@ export default function NewRequestPage() {
                     {TIMEZONES.map((tz) => <option key={tz} value={tz} style={{ background: "#111" }}>{tz}</option>)}
                   </select>
                 </div>
+                <div>
+                  <label className="text-white/40 text-xs uppercase tracking-wider block mb-1.5">Candidate Skills (comma-separated)</label>
+                  <input
+                    className="glass-input"
+                    placeholder="Python, FastAPI, PostgreSQL, Machine Learning"
+                    value={form.candidate.skills.join(", ")}
+                    onChange={(e) => setField("candidate.skills", e.target.value.split(",").map((s) => s.trim()).filter(Boolean))}
+                  />
+                  <p className="text-white/25 text-xs mt-1">Used to recommend the best-matched interviewers.</p>
+                </div>
               </div>
             )}
 
@@ -199,9 +243,14 @@ export default function NewRequestPage() {
             {step === 2 && (
               <div className="space-y-4">
                 <h2 className="text-white font-medium mb-2">Select Panelists</h2>
-                <p className="text-white/40 text-xs mb-5">
-                  {form.required_panelist_ids.length} selected — the system will check their Google Calendars
-                </p>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-white/40 text-xs">
+                    {form.required_panelist_ids.length} selected — the system will check their Google Calendars
+                  </p>
+                  <button type="button" className="btn-ghost text-xs" onClick={runRecommend} disabled={recommending}>
+                    {recommending ? <LoadingSpinner size="sm" /> : "✨ Recommend"}
+                  </button>
+                </div>
                 {panelists.length === 0 ? (
                   <div className="text-center py-8">
                     <p className="text-white/40 text-sm">No panelists found.</p>
@@ -209,8 +258,18 @@ export default function NewRequestPage() {
                   </div>
                 ) : (
                   <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                    {panelists.map((p) => {
+                    {[...panelists]
+                      .sort((a, b) => {
+                        const ra = recs[a.id], rb = recs[b.id];
+                        if (!ra && !rb) return 0;
+                        if (!ra) return 1;
+                        if (!rb) return -1;
+                        if (ra.available !== rb.available) return ra.available ? -1 : 1;
+                        return (rb.match_score || 0) - (ra.match_score || 0);
+                      })
+                      .map((p) => {
                       const selected = form.required_panelist_ids.includes(p.id);
+                      const rec = recs[p.id];
                       return (
                         <div
                           key={p.id}
@@ -224,8 +283,18 @@ export default function NewRequestPage() {
                             {selected && "✓"}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="text-white/80 text-sm font-medium truncate">{p.name}</p>
-                            <p className="text-white/35 text-xs truncate">{p.role || p.email}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="text-white/80 text-sm font-medium truncate">{p.name}</p>
+                              {rec && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/10 text-white/60 shrink-0">
+                                  {Math.round((rec.match_score || 0) * 100)}% match
+                                </span>
+                              )}
+                              {rec && !rec.available && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/05 text-white/40 shrink-0">unavailable</span>
+                              )}
+                            </div>
+                            <p className="text-white/35 text-xs truncate">{rec?.reason || p.role || p.email}</p>
                           </div>
                           <div className={clsx("w-2 h-2 rounded-full", p.calendar_connected ? "bg-white" : "bg-white/15")} title={p.calendar_connected ? "Calendar connected" : "No calendar"} />
                         </div>

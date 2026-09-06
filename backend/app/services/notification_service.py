@@ -33,10 +33,11 @@ def send_email(
     db.flush()
 
     try:
-        actual_to = settings.RESEND_TEST_TO_EMAIL or to_email
+        # Recipient is always the resolved application recipient (candidate /
+        # recruiter / panelist). Only the sender is configured via env.
         params = {
             "from": f"Smart Scheduler <{settings.RESEND_FROM_EMAIL}>",
-            "to": [actual_to],
+            "to": [to_email],
             "subject": subject,
             "html": html_body,
         }
@@ -47,7 +48,8 @@ def send_email(
         db.commit()
         return True
     except Exception as e:
-        logger.error(f"Email send failed to {to_email}: {e}")
+        # Never log credentials/API keys — only the recipient and error type.
+        logger.error("Email send failed to %s (%s): %s", to_email, notification_type, type(e).__name__)
         log.status = "failed"
         db.commit()
         return False
@@ -164,3 +166,33 @@ def send_cancellation(
     </div>
     """
     return send_email(db, to_email, subject, html, recipient_type, "cancellation", booking_id)
+
+
+def send_reschedule_request_notice(
+    db: Session,
+    to_email: str,
+    recipient_name: str,
+    recipient_type: str,
+    candidate_name: str,
+    job_title: str,
+    round_type: str,
+    reason: str = "",
+    booking_id=None,
+) -> bool:
+    """Notify a recruiter/panelist that a candidate rejected all proposed slots
+    and requested a reschedule. Recipient is resolved from application data."""
+    subject = f"Reschedule Requested — {job_title} ({round_type.title()} Round)"
+    reason_block = f'<p style="margin:4px 0"><strong>Reason:</strong> {reason}</p>' if reason else ""
+    html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#000;color:#fff;padding:32px;border-radius:12px;border:1px solid rgba(255,255,255,0.1)">
+      <h2>Reschedule Requested</h2>
+      <hr style="border:none;border-top:1px solid rgba(255,255,255,0.1);margin:16px 0"/>
+      <p>Hi {recipient_name},</p>
+      <p><strong>{candidate_name}</strong> could not attend any of the proposed slots for the
+         <strong>{round_type.title()} interview</strong> ({job_title}) and has requested a reschedule.</p>
+      {reason_block}
+      <p>Please propose a new set of time slots.</p>
+    </div>
+    """
+    plain = f"{candidate_name} requested a reschedule for {job_title} ({round_type}). Reason: {reason or 'n/a'}"
+    return send_email(db, to_email, subject, html, recipient_type, "reschedule_request", booking_id, plain)
